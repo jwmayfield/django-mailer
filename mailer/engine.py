@@ -1,3 +1,4 @@
+import datetime
 import time
 import smtplib
 import logging
@@ -15,6 +16,11 @@ EMPTY_QUEUE_SLEEP = getattr(settings, "MAILER_EMPTY_QUEUE_SLEEP", 30)
 # lock timeout value. how long to wait for the lock to become available.
 # default behavior is to never wait for the lock to be available.
 LOCK_WAIT_TIMEOUT = getattr(settings, "MAILER_LOCK_WAIT_TIMEOUT", -1)
+
+# when using some smtp relay hosts, they will refuse connections if too many
+# messages sent in too short a time frame, so establish a maximum number of messages
+# to send per attempt 
+SEND_LIMIT = getattr(settings, "MAILER_SEND_LIMIT", 0)
 
 
 def prioritize():
@@ -42,7 +48,7 @@ def send_all():
     
     lock = FileLock("send_mail")
     
-    logging.debug("acquiring lock...")
+    logging.debug("acquiring lock (%s)..." % datetime.datetime.now().isoformat())
     try:
         lock.acquire(LOCK_WAIT_TIMEOUT)
     except AlreadyLocked:
@@ -61,6 +67,8 @@ def send_all():
     
     try:
         for message in prioritize():
+            if SEND_LIMIT > 0 and sent >= SEND_LIMIT:
+                break
             if DontSendEntry.objects.has_address(message.to_address):
                 logging.info("skipping email to %s as on don't send list " % message.to_address)
                 MessageLog.objects.log(message, 2) # @@@ avoid using literal result code
